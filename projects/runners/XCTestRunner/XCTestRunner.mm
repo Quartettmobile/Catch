@@ -32,6 +32,37 @@
 #include <inttypes.h>
 #include <objc/message.h>
 
+#include "mock.hpp"
+
+namespace {
+    class CatchAdapter : public testing::EmptyTestEventListener
+    {
+        void OnTestStart(const testing::TestInfo& /*testInfo*/) override
+        {
+        }
+        void OnTestPartResult(const testing::TestPartResult& testPartResult) override
+        {
+            if(testPartResult.failed())
+            {
+                auto file = testPartResult.file_name() ? testPartResult.file_name() : "";
+                auto line = static_cast<size_t>(testPartResult.line_number() <= 0 ? 0 : testPartResult.line_number());
+                auto source = Catch::SourceLineInfo{file, line};
+                // Must use ContinueOnFailure because we are in the Mock's destructor and if Catch throws we end up in terminate()
+                Catch::ResultBuilder catchResult("", source, "", Catch::ResultDisposition::ContinueOnFailure);
+                catchResult << testPartResult.summary();
+                catchResult.captureResult(Catch::ResultWas::ExpressionFailed);
+                INTERNAL_CATCH_REACT(catchResult);
+            }
+        }
+        void OnTestEnd(const testing::TestInfo& /*testInfo*/) override
+        {
+        }
+    };
+    
+}
+
+
+
 namespace Catch {
     
 class XCTestReporter : public StreamingReporterBase {
@@ -366,6 +397,11 @@ const void *XCTestRegistryHub::TestSelectorKey = NULL;
 /* Runs before all C++ initializers; we can insert our custom registry hub here. */
 + (void) load {
     using namespace Catch;
+    
+    auto& listeners = testing::UnitTest::GetInstance()->listeners();
+    delete listeners.Release(listeners.default_result_printer());
+    listeners.Append(new CatchAdapter);
+
     
     RegistryHub **hub = &getTheRegistryHub();
     RegistryHub *previous = *hub;
